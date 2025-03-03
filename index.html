@@ -6,49 +6,30 @@
     <title>Troubleshooting Trail</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin: 50px; background-color: white; color: black; }
-        .container { display: flex; justify-content: center; gap: 50px; }
-        .column { width: 45%; }
         .preset-container { display: flex; align-items: center; justify-content: center; margin: 10px; }
         textarea { width: 70%; padding: 10px; font-size: 16px; background-color: lightgray; color: black; }
         button { padding: 10px; font-size: 16px; cursor: pointer; margin-left: 10px; background-color: orange; color: white; }
         input { width: 80%; margin: 10px; padding: 10px; font-size: 16px; }
         .color-picker-container { margin-top: 20px; }
+        .color-picker { display: none; }
     </style>
 </head>
 <body>
     <h2>Troubleshooting Trail</h2>
     
-    <div class="container">
-        <!-- Troubleshooting Steps Column -->
-        <div class="column">
-            <h3>Troubleshooting Steps</h3>
-            <div id="presetContainer">
-                <div class="preset-container"><textarea readonly>Rebooted the panel</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Turned test mode on/off</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Reset the cellular module</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Updated panel software</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Swapped the cell carrier</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Tried to find plug, and power the panel on</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Checked phone number in Stages</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Tried Two Way Voice Test through Cat50</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-            </div>
-            <button onclick="addPreset('presetContainer')">Add New Step</button>
-        </div>
-
-        <!-- Issues Column -->
-        <div class="column">
-            <h3>Issues</h3>
-            <div id="issueContainer">
-                <div class="preset-container"><textarea readonly>Two way Voice test fails to initialize</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Cell chip won't go in session</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Two way voice test goes to "In Call" then hangs up</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Panel won't turn on</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Cell isn't connecting on platinum</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-            </div>
-            <button onclick="addPreset('issueContainer')">Add New Issue</button>
-        </div>
+    <div id="presetContainer">
+        <div class="preset-container"><textarea readonly>Rebooted the panel</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Turned test mode on/off</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Reset the cellular module</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Updated panel software</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Swapped the cell carrier</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Tried to find plug, and power the panel on</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Checked phone number in Stages</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+        <div class="preset-container"><textarea readonly>Tried Two Way Voice Test through Cat50</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
     </div>
 
+    <br>
+    <button onclick="addPreset()">Add New Preset</button>
     <br>
     <textarea id="output" placeholder="Click button to paste here..." rows="15"></textarea>
     <br>
@@ -58,24 +39,28 @@
     <!-- Color Change Buttons -->
     <div class="color-picker-container">
         <button onclick="openColorPicker('bg')">Change Background Color</button>
-        <input type="color" id="bgColorPicker" class="color-picker" onchange="applyColor('bg')">
+        <input type="color" id="bgColorPicker" class="color-picker">
+        <button onclick="applyColor('bg')">Save Color</button>
     </div>
     <div class="color-picker-container">
         <button onclick="openColorPicker('btn')">Change Button Color</button>
-        <input type="color" id="btnColorPicker" class="color-picker" onchange="applyColor('btn')">
+        <input type="color" id="btnColorPicker" class="color-picker">
+        <button onclick="applyColor('btn')">Save Color</button>
     </div>
     <div class="color-picker-container">
         <button onclick="openColorPicker('txt')">Change Text Color</button>
-        <input type="color" id="txtColorPicker" class="color-picker" onchange="applyColor('txt')">
+        <input type="color" id="txtColorPicker" class="color-picker">
+        <button onclick="applyColor('txt')">Save Color</button>
     </div>
     <div class="color-picker-container">
         <button onclick="openColorPicker('box')">Change Text Box Color</button>
-        <input type="color" id="boxColorPicker" class="color-picker" onchange="applyColor('box')">
+        <input type="color" id="boxColorPicker" class="color-picker">
+        <button onclick="applyColor('box')">Save Color</button>
     </div>
 
     <script>
-        function addPreset(containerId) {
-            let container = document.getElementById(containerId);
+        function addPreset() {
+            let presetContainer = document.getElementById("presetContainer");
             let newDiv = document.createElement("div");
             newDiv.className = "preset-container";
 
@@ -88,7 +73,7 @@
 
             newDiv.appendChild(newTextarea);
             newDiv.appendChild(newButton);
-            container.appendChild(newDiv);
+            presetContainer.appendChild(newDiv);
         }
 
         function autoPaste(textarea) {
