@@ -71,7 +71,7 @@
     <!-- Color Pickers -->
     <div class="color-picker">
         <button onclick="document.getElementById('bgColor').click()">Change Background Color</button>
-        <input type="color" id="bgColor" onchange="changeColor('body', this.value)">
+        <input type="color" id="bgColor" onchange="changeBackgroundColor(this.value)">
         
         <button onclick="document.getElementById('textColor').click()">Change Text Color</button>
         <input type="color" id="textColor" onchange="changeTextColor(this.value)">
@@ -81,6 +81,10 @@
     </div>
 
     <script>
+        function changeBackgroundColor(color) {
+            document.body.style.backgroundColor = color;
+        }
+
         function changeTextColor(color) {
             document.body.style.color = color;
             document.querySelectorAll("textarea, button, h2, h3").forEach(el => el.style.color = color);
