@@ -7,7 +7,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Gravitas+One&display=swap" rel="stylesheet">
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin: 20px; background-color: #f5f5f5; }
-        h2 { font-family: 'Gravitas One', cursive; font-size: 40px; cursor: pointer; }
+        h2 { 
+            font-family: 'Gravitas One', cursive; 
+            font-size: 40px; 
+            cursor: pointer;
+        }
         .container { display: flex; justify-content: space-around; flex-wrap: wrap; }
         .column { width: 45%; }
         .preset-container { display: flex; align-items: center; justify-content: center; margin: 10px; }
@@ -18,7 +22,9 @@
     </style>
 </head>
 <body>
+
     <h2 contenteditable="true">Troubleshooting Trail</h2>
+
     <div class="container">
         <div class="column">
             <h3>Troubleshooting Steps</h3>
@@ -32,7 +38,9 @@
                 <div class="preset-container"><textarea readonly>Checked phone number in Stages</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
                 <div class="preset-container"><textarea readonly>Tried Two Way Voice Test through Cat50</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
             </div>
+            <button onclick="addPreset()">Add New Preset</button>
         </div>
+
         <div class="column">
             <h3>Issues</h3>
             <div id="issuesContainer">
@@ -46,24 +54,27 @@
                 <div class="preset-container"><textarea readonly>DNS error while registering</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
                 <div class="preset-container"><textarea readonly>Two way voice test is stuck on waiting for status</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
                 <div class="preset-container"><textarea readonly>Panel failed to register/Timeout</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+                <div class="preset-container"><textarea readonly>Operator never came through</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
             </div>
+            <button onclick="addIssue()">Add New Issue</button>
         </div>
     </div>
+
     <br>
     <textarea id="output" placeholder="Click button to paste here..." rows="9"></textarea>
     <br>
     <button onclick="copyOutput()">Copy Text</button>
     <button onclick="clearOutput()">Clear Text</button>
+
     <div class="color-picker">
         <button onclick="document.getElementById('bgColor').click()">Change Background Color</button>
         <input type="color" id="bgColor" onchange="changeColor('body', this.value)">
         <button onclick="document.getElementById('textColor').click()">Change Text Color</button>
-        <input type="color" id="textColor" onchange="changeTextColor(this.value)">
+        <input type="color" id="textColor" onchange="changeColor('body', this.value, 'color')">
         <button onclick="document.getElementById('boxColor').click()">Change Text Box Color</button>
-        <input type="color" id="boxColor" onchange="changeTextBoxColor(this.value)">
-        <button onclick="document.getElementById('buttonColor').click()">Change Button Color</button>
-        <input type="color" id="buttonColor" onchange="changeButtonColor(this.value)">
+        <input type="color" id="boxColor" onchange="changeColor('textarea', this.value, 'backgroundColor')">
     </div>
+
     <script>
         function autoPaste(textarea) {
             let outputField = document.getElementById("output");
@@ -78,19 +89,10 @@
         function clearOutput() {
             document.getElementById("output").value = "";
         }
-        function changeColor(element, color) {
-            document.querySelector(element).style.backgroundColor = color;
-        }
-        function changeTextColor(color) {
-            document.body.style.color = color;
-            document.querySelectorAll("textarea, button, h2, h3").forEach(el => el.style.color = color);
-        }
-        function changeTextBoxColor(color) {
-            document.querySelectorAll("textarea").forEach(el => el.style.backgroundColor = color);
-        }
-        function changeButtonColor(color) {
-            document.querySelectorAll("button").forEach(el => el.style.backgroundColor = color);
+        function changeColor(element, color, property = "backgroundColor") {
+            document.querySelector(element).style[property] = color;
         }
     </script>
+
 </body>
 </html>
