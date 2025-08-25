@@ -1,110 +1,366 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Troubleshooting Trail</title>
-    <link href="https://fonts.googleapis.com/css2?family=Gravitas+One&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; background-color: #f5f5f5; }
-        h2 { font-family: 'Gravitas One', cursive; font-size: 40px; cursor: pointer; }
-        .container { display: flex; justify-content: space-around; flex-wrap: wrap; }
-        .column { width: 45%; }
-        .preset-container { display: flex; align-items: center; justify-content: center; margin: 10px; }
-        textarea { width: 70%; padding: 10px; font-size: 16px; }
-        button { padding: 15px; font-size: 18px; cursor: pointer; margin: 10px; }
-        .color-picker { margin-top: 20px; }
-        input[type="color"] { margin-left: 10px; } /* Ensures visibility of color picker */
-    </style>
-</head>
-<body>
+import React, { useEffect, useMemo, useState } from "react";
 
-    <h2 contenteditable="true">Troubleshooting Trail</h2>
+// City Builder — Isometric 4×4 (Session Only) + More Detail + Day/Night & Traffic
+// Additional realism features:
+// • Randomized building colors
+// • Simple day/night cycle that fades window lights
+// • Traffic lights at each intersection
+// • Drifting clouds in the sky
 
-    <div class="container">
-        <!-- Troubleshooting Steps Column -->
-        <div class="column">
-            <h3>Troubleshooting Steps</h3>
-            <div id="presetContainer">
-                <div class="preset-container"><textarea readonly>Rebooted the panel</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Turned test mode on/off</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Reset the cellular module</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Updated panel software</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Swapped the cell carrier</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Tried to find plug, and power the panel on</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Checked phone number in Stages</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Tried Two Way Voice Test through Cat50</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+const MAX_TASKS = 200;
+const PAY_PER_TASK = 10;
+
+function loadState() {
+  return { tasks: 0 };
+}
+
+function makeSteps() {
+  const steps: any[] = [];
+
+  // decorative clouds across the sky
+  const clouds = [
+    { x: 200, y: 80 },
+    { x: 600, y: 60 },
+    { x: 1000, y: 90 },
+  ];
+  clouds.forEach((c) => steps.push({ type: "cloud", ...c }));
+
+  const gridSize = 4; // 4x4 blocks
+  const xSpacing = 280;
+  const ySpacing = 180;
+
+  for (let gx = 0; gx < gridSize; gx++) {
+    for (let gy = 0; gy < gridSize; gy++) {
+      const baseX = 150 + gx * xSpacing;
+      const baseY = 250 + gy * ySpacing;
+
+      // Roads around block
+      steps.push({ type: "roadH", x: baseX - 40, y: baseY + 120, w: 260 });
+      steps.push({ type: "roadV", x: baseX + 200, y: baseY - 40, h: 180 });
+
+      // Lane paint & crosswalks
+      steps.push({ type: "lanePaint", x: baseX - 40, y: baseY + 126, w: 260 });
+      steps.push({ type: "lanePaintV", x: baseX + 206, y: baseY - 40, h: 180 });
+      steps.push({ type: "crosswalk", x: baseX + 180, y: baseY + 110, w: 20, h: 10 });
+
+      // Sidewalks
+      steps.push({ type: "sidewalk", x: baseX - 20, y: baseY + 110, w: 260, h: 10 });
+      steps.push({ type: "sidewalk", x: baseX + 190, y: baseY - 20, w: 10, h: 180 });
+
+      // Traffic light
+      steps.push({ type: "trafficLight", x: baseX + 185, y: baseY + 110 });
+
+      // Building layers
+      const bX = baseX + 60;
+      const bW = 80;
+      const bBaseY = baseY + 90;
+      const colors = ["#334155", "#475569", "#1e293b"];
+      const buildingColor = colors[(gx + gy) % colors.length];
+      for (let i = 0; i < 6; i++) {
+        steps.push({
+          type: "buildingLayer",
+          x: bX,
+          y: bBaseY - i * 22,
+          w: bW,
+          h: 22,
+          layer: i,
+          color: buildingColor,
+        });
+      }
+      // Rooftop unit
+      steps.push({
+        type: "rooftop",
+        x: bX + bW / 2 - 8,
+        y: bBaseY - 6 * 22 - 6,
+        w: 16,
+        h: 8,
+      });
+
+      // Windows
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 3; c++) {
+          steps.push({ type: "window", x: bX + 6 + c * 22, y: bBaseY - 20 - r * 22 });
+        }
+      }
+
+      // Street furniture
+      steps.push({ type: "bench", x: baseX + 40, y: baseY + 118 });
+      steps.push({ type: "bench", x: baseX + 140, y: baseY + 118 });
+      steps.push({ type: "busStop", x: baseX - 10, y: baseY + 108 });
+
+      // Decorative
+      steps.push({ type: "tree", x: baseX + 30, y: baseY + 120 });
+      steps.push({ type: "tree", x: baseX + 150, y: baseY + 120 });
+      steps.push({ type: "streetlight", x: baseX + 100, y: baseY + 130 });
+
+      // Small park tile
+      steps.push({ type: "park", x: baseX + 10, y: baseY + 135, w: 60, h: 30 });
+
+      // Car (nicer drawing)
+      steps.push({ type: "car", x: baseX + 80, y: baseY + 125, color: gx % 2 ? "#ef4444" : "#3b82f6" });
+    }
+  }
+
+  return steps.slice(0, MAX_TASKS);
+}
+
+const STEPS = makeSteps();
+
+export default function App() {
+  const [state, setState] = useState(loadState());
+  const [isNight, setIsNight] = useState(false);
+
+  // Toggle day/night every 10 seconds
+  useEffect(() => {
+    const id = setInterval(() => setIsNight((n) => !n), 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  const t = state.tasks;
+  const earnings = t * PAY_PER_TASK;
+  const progress = Math.min(100, Math.round((t / MAX_TASKS) * 100));
+
+  const addTask = () => setState((s) => ({ tasks: Math.min(MAX_TASKS, s.tasks + 1) }));
+  const undoTask = () => setState((s) => ({ tasks: Math.max(0, s.tasks - 1) }));
+  const resetAll = () => {
+    if (confirm("Reset city progress?")) setState({ tasks: 0 });
+  };
+
+  const visible = useMemo(() => STEPS.slice(0, t), [t]);
+
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-b from-sky-200 via-sky-100 to-emerald-50 text-slate-800">
+      <header className="max-w-6xl mx-auto p-6">
+        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">City Builder — Isometric 4×4 (Session Only)</h1>
+        <p className="text-slate-600 mt-1">
+          No saving to localStorage. More spacing & richer details. Each click adds one thing.
+        </p>
+      </header>
+
+      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
+        <section className="lg:col-span-2">
+          <div className="bg-white/70 shadow-sm rounded-2xl p-4 ring-1 ring-slate-200">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={addTask}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 active:scale-[.98] disabled:opacity-50"
+                  disabled={t >= MAX_TASKS}
+                >
+                  + Log Task
+                </button>
+                <button onClick={undoTask} className="px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300">
+                  Undo
+                </button>
+                <button onClick={resetAll} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200">
+                  Reset
+                </button>
+              </div>
+              <div className="text-sm text-slate-600">{t}/{MAX_TASKS} tasks</div>
             </div>
-            <button onclick="addPreset()">Add New Preset</button>
-        </div>
 
-        <!-- Issues Column -->
-        <div class="column">
-            <h3>Issues</h3>
-            <div id="issuesContainer">
-                <div class="preset-container"><textarea readonly>Two way Voice test fails to initialize</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Cell chip won't go in session</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Two way voice test goes to "In Call" then hangs up</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Panel won't turn on</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Cell isn't connecting on platinum</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Locked out of installer toolbox, panel is unregistered</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Sim status is out of date while registering</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>DNS error while registering</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Two way voice test is stuck on waiting for status</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Panel failed to register/Timeout</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
-                <div class="preset-container"><textarea readonly>Operator never came through</textarea><button onclick="autoPaste(this.previousElementSibling)">Paste</button></div>
+            <div className="h-3 rounded-full bg-slate-200 overflow-hidden mb-4">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
             </div>
-            <button onclick="addIssue()">Add New Issue</button>
-        </div>
+
+            <div className="relative w-full min-h-[900px]">
+              <svg viewBox="0 0 1800 1000" className="w-full h-auto">
+                <defs>
+                  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={isNight ? "#1e3a8a" : "#bae6fd"} />
+                    <stop offset="100%" stopColor={isNight ? "#475569" : "#d1fae5"} />
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="1800" height="1000" fill="url(#sky)" />
+                <rect x="0" y="900" width="1800" height="100" fill={isNight ? "#14532d" : "#86efac"} />
+
+                <g transform="skewY(-12) scaleY(0.9)">
+                  {visible.map((step, idx) => {
+                    switch (step.type) {
+                      case "roadH":
+                        return <rect key={idx} x={step.x} y={step.y} width={step.w} height="12" fill="#475569" />;
+                      case "roadV":
+                        return <rect key={idx} x={step.x} y={step.y} width="12" height={step.h} fill="#475569" />;
+                      case "lanePaint": {
+                        const stripes: number[] = [];
+                        for (let x = step.x + 10; x < step.x + step.w - 10; x += 28) stripes.push(x);
+                        return (
+                          <g key={idx} className="anim-fade">
+                            {stripes.map((sx) => (
+                              <rect key={sx} x={sx} y={step.y + 4} width={16} height={3} fill="#facc15" rx={1} />
+                            ))}
+                          </g>
+                        );
+                      }
+                      case "lanePaintV": {
+                        const stripes: number[] = [];
+                        for (let y = step.y + 10; y < step.y + step.h - 10; y += 28) stripes.push(y);
+                        return (
+                          <g key={idx} className="anim-fade">
+                            {stripes.map((sy) => (
+                              <rect key={sy} x={step.x + 4} y={sy} width={3} height={16} fill="#facc15" rx={1} />
+                            ))}
+                          </g>
+                        );
+                      }
+                      case "crosswalk": {
+                        const bars: number[] = [];
+                        for (let i = 0; i < 6; i++) bars.push(i);
+                        return (
+                          <g key={idx} className="anim-fade">
+                            {bars.map((i) => (
+                              <rect key={i} x={step.x + i * 4} y={step.y} width={3} height={step.h} fill="#e5e7eb" />
+                            ))}
+                          </g>
+                        );
+                      }
+                      case "sidewalk":
+                        return <rect key={idx} x={step.x} y={step.y} width={step.w} height={step.h} fill="#cbd5e1" />;
+                      case "trafficLight":
+                        return (
+                          <g key={idx} className="anim-fade">
+                            <rect x={step.x} y={step.y - 20} width="4" height="20" fill="#1e293b" />
+                            <rect x={step.x - 4} y={step.y - 24} width="12" height="8" rx={2} fill="#334155" />
+                            <circle cx={step.x + 2} cy={step.y - 22} r="1.5" fill="#dc2626" />
+                            <circle cx={step.x + 2} cy={step.y - 19} r="1.5" fill="#facc15" />
+                            <circle cx={step.x + 2} cy={step.y - 16} r="1.5" fill="#16a34a" />
+                          </g>
+                        );
+                      case "buildingLayer":
+                        return (
+                          <rect
+                            key={idx}
+                            x={step.x}
+                            y={step.y}
+                            width={step.w}
+                            height={step.h}
+                            fill={step.color}
+                            stroke="#1e293b"
+                            strokeWidth="2"
+                            className="anim-rise origin-bottom"
+                          />
+                        );
+                      case "rooftop":
+                        return (
+                          <rect
+                            key={idx}
+                            x={step.x}
+                            y={step.y}
+                            width={step.w}
+                            height={step.h}
+                            fill="#64748b"
+                            stroke="#94a3b8"
+                            strokeWidth="1"
+                            rx={2}
+                            className="anim-fade"
+                          />
+                        );
+                      case "window":
+                        return (
+                          <rect
+                            key={idx}
+                            x={step.x}
+                            y={step.y}
+                            width="12"
+                            height="8"
+                            fill={isNight ? "#fde68a" : "#e0f2fe"}
+                            stroke={isNight ? "#fcd34d" : "#bae6fd"}
+                            strokeWidth="0.5"
+                            className="anim-fade"
+                          />
+                        );
+                      case "bench":
+                        return (
+                          <g key={idx} className="anim-fade">
+                            <rect x={step.x - 10} y={step.y - 3} width={20} height={3} fill="#92400e" />
+                            <rect x={step.x - 10} y={step.y - 6} width={20} height={3} fill="#b45309" />
+                            <rect x={step.x - 9} y={step.y} width={2} height={4} fill="#78350f" />
+                            <rect x={step.x + 7} y={step.y} width={2} height={4} fill="#78350f" />
+                          </g>
+                        );
+                      case "busStop":
+                        return (
+                          <g key={idx} className="anim-fade">
+                            <rect x={step.x} y={step.y - 16} width="4" height="16" fill="#0f172a" />
+                            <rect x={step.x + 6} y={step.y - 14} width="22" height="10" rx={2} fill="#3b82f6" />
+                          </g>
+                        );
+                      case "park":
+                        return (
+                          <rect
+                            key={idx}
+                            x={step.x}
+                            y={step.y}
+                            width={step.w}
+                            height={step.h}
+                            fill="#86efac"
+                            stroke="#16a34a"
+                            strokeWidth="1"
+                            rx={3}
+                            className="anim-fade"
+                          />
+                        );
+                      case "tree":
+                        return (
+                          <g key={idx} className="anim-fade">
+                            <circle cx={step.x} cy={step.y} r="12" fill="#16a34a" />
+                            <rect x={step.x - 3} y={step.y} width="6" height="15" fill="#78350f" />
+                          </g>
+                        );
+                      case "streetlight":
+                        return (
+                          <g key={idx} className="anim-fade">
+                            <rect x={step.x} y={step.y - 40} width="4" height="40" fill="#475569" />
+                            <circle cx={step.x + 2} cy={step.y - 40} r="6" fill="#fde047" />
+                          </g>
+                        );
+                      case "car":
+                        return (
+                          <g key={idx} className="anim-slide">
+                            <rect x={step.x} y={step.y} width="32" height="12" rx="3" fill={step.color} />
+                            <rect x={step.x + 8} y={step.y - 4} width="16" height="6" rx="2" fill="#e5e7eb" />
+                            <rect x={step.x + 10} y={step.y - 2} width="12" height="4" rx="1" fill="#93c5fd" />
+                            <circle cx={step.x + 6} cy={step.y + 12} r="2" fill="#0f172a" />
+                            <circle cx={step.x + 26} cy={step.y + 12} r="2" fill="#0f172a" />
+                          </g>
+                        );
+                      case "cloud":
+                        return (
+                          <g key={idx} className="anim-cloud">
+                            <ellipse cx={step.x} cy={step.y} rx="35" ry="20" fill="#f1f5f9" />
+                            <ellipse cx={step.x + 25} cy={step.y + 10} rx="35" ry="20" fill="#f1f5f9" />
+                            <ellipse cx={step.x - 25} cy={step.y + 10} rx="35" ry="20" fill="#f1f5f9" />
+                          </g>
+                        );
+                      default:
+                        return null;
+                    }
+                  })}
+                </g>
+              </svg>
+            </div>
+          </div>
+        </section>
+
+        <aside className="space-y-4">
+          <div className="bg-white/70 rounded-2xl p-5 ring-1 ring-slate-200 shadow-sm">
+            <h2 className="text-xl font-semibold mb-2">Earnings</h2>
+            <div className="text-4xl font-bold tabular-nums">${earnings.toLocaleString()}</div>
+            <p className="text-sm text-slate-600">${PAY_PER_TASK.toFixed(0)} per task × {t} tasks</p>
+          </div>
+        </aside>
+      </main>
+
+      <style>{`
+        @keyframes rise { from { transform: scaleY(0); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes drift { from { transform: translateX(0); } to { transform: translateX(80px); } }
+        .anim-rise { animation: rise .6s ease-out both; }
+        .anim-fade { animation: fadeIn .5s ease-in both; }
+        .anim-slide { animation: slideIn .6s ease-out both; }
+        .anim-cloud { animation: drift 30s linear infinite alternate; }
+      `}</style>
     </div>
-
-    <br>
-    <textarea id="output" placeholder="Click button to paste here..." rows="9"></textarea>
-    <br>
-    <button onclick="copyOutput()">Copy Text</button>
-    <button onclick="clearOutput()">Clear Text</button>
-
-    <!-- Color Pickers -->
-    <div class="color-picker">
-        <button onclick="document.getElementById('bgColor').click()">Change Background Color</button>
-        <input type="color" id="bgColor" onchange="changeBackgroundColor(this.value)">
-        
-        <button onclick="document.getElementById('textColor').click()">Change Text Color</button>
-        <input type="color" id="textColor" onchange="changeTextColor(this.value)">
-        
-        <button onclick="document.getElementById('boxColor').click()">Change Text Box Color</button>
-        <input type="color" id="boxColor" onchange="changeTextBoxColor(this.value)">
-    </div>
-
-    <script>
-        function changeBackgroundColor(color) {
-            document.body.style.backgroundColor = color;
-        }
-
-        function changeTextColor(color) {
-            document.body.style.color = color;
-            document.querySelectorAll("textarea, button, h2, h3").forEach(el => el.style.color = color);
-        }
-
-        function changeTextBoxColor(color) {
-            document.querySelectorAll("textarea").forEach(el => el.style.backgroundColor = color);
-        }
-
-        function autoPaste(textarea) {
-            const output = document.getElementById("output");
-            const timestamp = new Date().toLocaleTimeString();
-            output.value += (output.value ? "\n" : "") + `[${timestamp}] ${textarea.value}`;
-        }
-
-        function copyOutput() {
-            const output = document.getElementById("output");
-            output.select();
-            document.execCommand("copy");
-        }
-
-        function clearOutput() {
-            document.getElementById("output").value = "";
-        }
-    </script>
-</body>
-</html>
+  );
+}
