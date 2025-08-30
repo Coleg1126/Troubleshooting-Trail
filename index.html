@@ -1,366 +1,623 @@
-import React, { useEffect, useMemo, useState } from "react";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>City Builder — 250-step Incremental (Cars + Buildings + Park)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes rise { from { transform: scaleY(0); opacity:0 } to { transform: scaleY(1); opacity:1 } }
+    @keyframes fly { from { transform: translateY(-24px); opacity:0 } to { transform: translateY(0); opacity:1 } }
+    .anim-fade { animation: fadeIn .5s ease-out both }
+    .anim-rise { animation: rise .5s ease-out both; transform-origin: bottom }
+    .anim-fly { animation: fly .5s ease-out both }
+    .window { fill:#e0f2fe; stroke:#bae6fd; stroke-width:.6 }
+    .night .window { fill:#facc15; stroke:#fde047 }
+    .stat { font-variant-numeric: tabular-nums }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-b from-sky-200 via-sky-100 to-emerald-50 text-slate-800">
+  <main class="max-w-6xl mx-auto p-6">
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div class="flex items-center gap-2">
+        <button id="addTask" class="px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">+ Log Task</button>
+        <button id="undoTask" class="px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300">Undo</button>
+        <button id="reset" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200">Reset</button>
+      </div>
+      <div class="flex items-baseline gap-6">
+        <div>
+          <div class="text-xs text-slate-500">Tasks</div>
+          <div id="taskCount" class="text-sm font-medium stat">0/250</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Earnings</div>
+          <div id="earnings" class="text-2xl font-bold stat">$0</div>
+          <div id="earningsDetail" class="text-xs text-slate-500">$10 per task × 0 tasks</div>
+        </div>
+      </div>
+    </div>
 
-// City Builder — Isometric 4×4 (Session Only) + More Detail + Day/Night & Traffic
-// Additional realism features:
-// • Randomized building colors
-// • Simple day/night cycle that fades window lights
-// • Traffic lights at each intersection
-// • Drifting clouds in the sky
+    <div class="h-2 rounded-full bg-slate-200 overflow-hidden my-3">
+      <div id="progressBar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
+    </div>
 
-const MAX_TASKS = 200;
-const PAY_PER_TASK = 10;
+    <svg viewBox="-60 -60 1160 1160" class="w-full h-[950px] mt-4">
+      <rect x="-60" y="-60" width="1160" height="1160" fill="#d1fae5" />
+      <g id="roadsLayer"></g>
+      <g id="laneLayer"></g>
+      <g id="lotsLayer"></g>
+      <g id="buildingsLayer"></g>
+      <g id="detailsLayer"></g>
+      <g id="parkLayer"></g>
+      <g id="carsLayer"></g>
+    </svg>
+  </main>
 
-function loadState() {
-  return { tasks: 0 };
-}
+<script>
+  const GRID=4, CELL=260, ROAD_W=40;
+  const PAY_PER_TASK=10, MAX_TASKS=250;
 
-function makeSteps() {
-  const steps: any[] = [];
+  // --- STATE (declare early) ---
+  let tasks=0, taskIndex=0;
+  let cars=[]; 
+  let carTimer=null;
 
-  // decorative clouds across the sky
-  const clouds = [
-    { x: 200, y: 80 },
-    { x: 600, y: 60 },
-    { x: 1000, y: 90 },
-  ];
-  clouds.forEach((c) => steps.push({ type: "cloud", ...c }));
+  // Layers
+  const roadsLayer=document.getElementById('roadsLayer');
+  const laneLayer=document.getElementById('laneLayer');
+  const lotsLayer=document.getElementById('lotsLayer');
+  const buildingsLayer=document.getElementById('buildingsLayer');
+  const detailsLayer=document.getElementById('detailsLayer');
+  const parkLayer=document.getElementById('parkLayer');
+  const carsLayer=document.getElementById('carsLayer');
 
-  const gridSize = 4; // 4x4 blocks
-  const xSpacing = 280;
-  const ySpacing = 180;
+  // RNG
+  function mulberry32(a){return function(){let t=a+=0x6d2b79f5;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296;} };
+  const rng=mulberry32(7);
+  const rand=()=>rng();
 
-  for (let gx = 0; gx < gridSize; gx++) {
-    for (let gy = 0; gy < gridSize; gy++) {
-      const baseX = 150 + gx * xSpacing;
-      const baseY = 250 + gy * ySpacing;
+  const TOTAL=GRID*CELL;
 
-      // Roads around block
-      steps.push({ type: "roadH", x: baseX - 40, y: baseY + 120, w: 260 });
-      steps.push({ type: "roadV", x: baseX + 200, y: baseY - 40, h: 180 });
+  function add(layer,html,cls){
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    if(cls) g.setAttribute('class',cls);
+    g.innerHTML=html; layer.appendChild(g);
+  }
 
-      // Lane paint & crosswalks
-      steps.push({ type: "lanePaint", x: baseX - 40, y: baseY + 126, w: 260 });
-      steps.push({ type: "lanePaintV", x: baseX + 206, y: baseY - 40, h: 180 });
-      steps.push({ type: "crosswalk", x: baseX + 180, y: baseY + 110, w: 20, h: 10 });
+  // Tiny on-screen error toast
+  function toast(msg){
+    let el=document.getElementById('__toast');
+    if(!el){
+      el=document.createElement('div');
+      el.id='__toast';
+      el.style.cssText='position:fixed;right:12px;bottom:12px;max-width:60ch;background:#111827;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.25);font:12px/1.3 system-ui,Segoe UI,Roboto';
+      document.body.appendChild(el);
+    }
+    el.textContent=msg;
+    el.style.opacity='1';
+    setTimeout(()=>{el.style.opacity='0.0'}, 3500);
+  }
 
-      // Sidewalks
-      steps.push({ type: "sidewalk", x: baseX - 20, y: baseY + 110, w: 260, h: 10 });
-      steps.push({ type: "sidewalk", x: baseX + 190, y: baseY - 20, w: 10, h: 180 });
-
-      // Traffic light
-      steps.push({ type: "trafficLight", x: baseX + 185, y: baseY + 110 });
-
-      // Building layers
-      const bX = baseX + 60;
-      const bW = 80;
-      const bBaseY = baseY + 90;
-      const colors = ["#334155", "#475569", "#1e293b"];
-      const buildingColor = colors[(gx + gy) % colors.length];
-      for (let i = 0; i < 6; i++) {
-        steps.push({
-          type: "buildingLayer",
-          x: bX,
-          y: bBaseY - i * 22,
-          w: bW,
-          h: 22,
-          layer: i,
-          color: buildingColor,
-        });
-      }
-      // Rooftop unit
-      steps.push({
-        type: "rooftop",
-        x: bX + bW / 2 - 8,
-        y: bBaseY - 6 * 22 - 6,
-        w: 16,
-        h: 8,
-      });
-
-      // Windows
-      for (let r = 0; r < 5; r++) {
-        for (let c = 0; c < 3; c++) {
-          steps.push({ type: "window", x: bX + 6 + c * 22, y: bBaseY - 20 - r * 22 });
-        }
-      }
-
-      // Street furniture
-      steps.push({ type: "bench", x: baseX + 40, y: baseY + 118 });
-      steps.push({ type: "bench", x: baseX + 140, y: baseY + 118 });
-      steps.push({ type: "busStop", x: baseX - 10, y: baseY + 108 });
-
-      // Decorative
-      steps.push({ type: "tree", x: baseX + 30, y: baseY + 120 });
-      steps.push({ type: "tree", x: baseX + 150, y: baseY + 120 });
-      steps.push({ type: "streetlight", x: baseX + 100, y: baseY + 130 });
-
-      // Small park tile
-      steps.push({ type: "park", x: baseX + 10, y: baseY + 135, w: 60, h: 30 });
-
-      // Car (nicer drawing)
-      steps.push({ type: "car", x: baseX + 80, y: baseY + 125, color: gx % 2 ? "#ef4444" : "#3b82f6" });
+  // --- LOTS ---
+  const lots=[];
+  for(let gx=0;gx<GRID;gx++){
+    for(let gy=0;gy<GRID;gy++){
+      const x=gx*CELL+ROAD_W/2+16;
+      const y=gy*CELL+ROAD_W/2+16;
+      const w=CELL-ROAD_W-32;
+      lots.push({gx,gy,x,y,w,h:w,key:`${gx},${gy}`});
     }
   }
 
-  return steps.slice(0, MAX_TASKS);
-}
+  // --- CLIP PATHS (keep everything inside lots) ---
+  (function setupClips(){
+    const svg=document.querySelector('svg');
+    let defs=svg.querySelector('defs');
+    if(!defs){ defs=document.createElementNS('http://www.w3.org/2000/svg','defs'); svg.insertBefore(defs, svg.firstChild); }
+    for(const L of lots){
+      const cp=document.createElementNS('http://www.w3.org/2000/svg','clipPath');
+      cp.setAttribute('id',`clip-${L.key}`);
+      const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      r.setAttribute('x',L.x); r.setAttribute('y',L.y); r.setAttribute('width',L.w); r.setAttribute('height',L.h);
+      cp.appendChild(r); defs.appendChild(cp);
+    }
+  })();
+  const wrapClip = (L, inner) => `<g clip-path="url(#clip-${L.key})">${inner}</g>`;
 
-const STEPS = makeSteps();
+  // --- TYPES ---
+  function pickType(){
+    const r=rand();
+    if(r<0.18) return 'house';
+    if(r<0.33) return 'restaurant';
+    if(r<0.48) return 'shop';
+    if(r<0.70) return 'skyscraper';
+    if(r<0.85) return 'church';
+    return 'office';
+  }
 
-export default function App() {
-  const [state, setState] = useState(loadState());
-  const [isNight, setIsNight] = useState(false);
+  // --- PLANS ---
+  function buildingPlan(L,type){
+    const plan = [
+      {k:'lot', L},
+      {k:'b-found', L, type},
+      {k:'b-body',  L, type},   // sets L._foot
+      {k:'b-roof',  L, type},   // sets L._roofClearance
+    ];
+    if(type==='house'){
+      plan.push(
+        {k:'b-door', L, type},
+        {k:'b-winbatch', L, type, n:1},
+        {k:'yard-base', L},          // behind, big
+        {k:'yard-fence-n', L},
+        {k:'yard-fence-e', L},
+        {k:'yard-fence-s', L},
+        {k:'yard-fence-w', L},
+        {k:'b-garden', L},
+        {k:'b-lamp', L}
+      );
+    } else if(type==='shop'){
+      plan.push(
+        {k:'b-sign', L, type, text:'SHOP'},
+        {k:'b-awning', L, type},
+        {k:'b-winbatch', L, type, n:1},
+        {k:'b-door', L, type},
+        {k:'park-base', L},          // behind, big
+        {k:'park-stripes', L, n:1},
+        {k:'park-stripes', L, n:2},
+        {k:'b-planters', L, type},
+        {k:'b-lamp', L, type}
+      );
+    } else if(type==='restaurant'){
+      plan.push(
+        {k:'b-sign', L, type, text:'DINER'},
+        {k:'b-awning', L, type},
+        {k:'b-winbatch', L, type, n:1},
+        {k:'b-door', L, type},
+        {k:'park-base', L},          // behind, big
+        {k:'park-stripes', L, n:1},
+        {k:'park-stripes', L, n:2},
+        {k:'b-outdoorSeats', L, type},
+        {k:'b-lamp', L, type}
+      );
+    } else if(type==='church'){
+      plan.push(
+        {k:'b-door', L, type},
+        {k:'b-roundWindow', L, type},
+        {k:'b-cross', L, type},
+        {k:'park-base', L},          // church parking behind
+        {k:'park-stripes', L, n:1},
+        {k:'park-stripes', L, n:2},
+        {k:'b-lamp', L, type}
+      );
+    } else if(type==='office'){
+      plan.push(
+        {k:'b-winbatch', L, type, n:1},
+        {k:'b-winbatch', L, type, n:2},
+        {k:'b-winbatch', L, type, n:3},
+        {k:'b-door', L, type},
+        {k:'b-lobby', L, type},
+        {k:'b-lamp', L, type}
+      );
+    } else if(type==='skyscraper'){
+      plan.push(
+        {k:'b-winrows', L, type, n:1},
+        {k:'b-winrows', L, type, n:2},
+        {k:'b-winrows', L, type, n:3},
+        {k:'b-winrows', L, type, n:4},
+        {k:'b-rooftopUnit', L, type},
+        {k:'b-lamp', L, type}
+      );
+    }
+    plan.push({k:'lot-sidewalk', L});
+    return plan;
+  }
 
-  // Toggle day/night every 10 seconds
-  useEffect(() => {
-    const id = setInterval(() => setIsNight((n) => !n), 10000);
-    return () => clearInterval(id);
-  }, []);
+  const parkLot = lots[Math.floor(rand()*lots.length)];
+  function parkPlan(L){
+    return [
+      {k:'parkBase',  L},
+      {k:'parkField', L},
+      {k:'parkCourt', L},
+      {k:'parkPlay',  L},
+      {k:'parkPaths', L},
+      {k:'parkTrees', L},
+      {k:'parkBench', L},
+      {k:'parkFlowers', L}
+    ];
+  }
 
-  const t = state.tasks;
-  const earnings = t * PAY_PER_TASK;
-  const progress = Math.min(100, Math.round((t / MAX_TASKS) * 100));
+  // --- BUILD SCHEDULE (sequential lots) ---
+  const steps=[];
+  for(let r=0;r<=GRID;r++) steps.push({k:'roadH',y:r*CELL-ROAD_W/2});
+  for(let c=0;c<=GRID;c++) steps.push({k:'roadV',x:c*CELL-ROAD_W/2});
+  steps.push({k:'lanes'});
 
-  const addTask = () => setState((s) => ({ tasks: Math.min(MAX_TASKS, s.tasks + 1) }));
-  const undoTask = () => setState((s) => ({ tasks: Math.max(0, s.tasks - 1) }));
-  const resetAll = () => {
-    if (confirm("Reset city progress?")) setState({ tasks: 0 });
-  };
+  steps.push(...parkPlan(parkLot));
+  for(const L of lots){
+    if(L===parkLot) continue;
+    const type=pickType();
+    steps.push(...buildingPlan(L,type));
+  }
+  while(steps.length<MAX_TASKS){
+    const L=lots[Math.floor(rand()*lots.length)];
+    steps.push({k:'yard-flower', L});
+  }
 
-  const visible = useMemo(() => STEPS.slice(0, t), [t]);
+  (function showCount(){
+    const tag=document.createElement('div');
+    tag.style.cssText='position:fixed;left:10px;bottom:10px;background:#e2e8f0;color:#111827;padding:4px 8px;border-radius:8px;font:11px system-ui';
+    tag.textContent=`steps: ${steps.length}`;
+    document.body.appendChild(tag);
+    setTimeout(()=>tag.remove(), 3000);
+  })();
 
-  return (
-    <div className="min-h-screen w-full bg-gradient-to-b from-sky-200 via-sky-100 to-emerald-50 text-slate-800">
-      <header className="max-w-6xl mx-auto p-6">
-        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">City Builder — Isometric 4×4 (Session Only)</h1>
-        <p className="text-slate-600 mt-1">
-          No saving to localStorage. More spacing & richer details. Each click adds one thing.
-        </p>
-      </header>
+  // --- UI ---
+  function updateUI(){
+    document.getElementById('taskCount').textContent=`${tasks}/${MAX_TASKS}`;
+    document.getElementById('progressBar').style.width=`${Math.round((tasks/MAX_TASKS)*100)}%`;
+    document.getElementById('earnings').textContent=`$${(tasks*PAY_PER_TASK).toLocaleString()}`;
+    document.getElementById('earningsDetail').textContent=`$${PAY_PER_TASK} per task × ${tasks} tasks`;
+  }
 
-      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
-        <section className="lg:col-span-2">
-          <div className="bg-white/70 shadow-sm rounded-2xl p-4 ring-1 ring-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={addTask}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 active:scale-[.98] disabled:opacity-50"
-                  disabled={t >= MAX_TASKS}
-                >
-                  + Log Task
-                </button>
-                <button onClick={undoTask} className="px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300">
-                  Undo
-                </button>
-                <button onClick={resetAll} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200">
-                  Reset
-                </button>
-              </div>
-              <div className="text-sm text-slate-600">{t}/{MAX_TASKS} tasks</div>
-            </div>
+  // footprint helpers
+  function setFootprint(L, x, y, w, h){ L._foot = {x,y,w,h}; }
 
-            <div className="h-3 rounded-full bg-slate-200 overflow-hidden mb-4">
-              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
-            </div>
+  // NEW: compute behind-rectangle that never covers roof
+  // padH controls height target; we clamp to space above roof apex (clearance).
+  function rectBehindBuilding(L, padH, margin=6){
+    if(!L._foot){
+      const y=L.y+margin, h=Math.max(12, padH);
+      return {x:L.x+margin, y, w:L.w-2*margin, h:Math.min(h, L.h-2*margin)};
+    }
+    const clearance = L._roofClearance ?? 12; // pixels reserved for roof shape
+    const topEdge = L.y + margin;
+    const maxBottom = L._foot.y - clearance; // yard/parking must end ABOVE this
+    const usableTopSpace = Math.max(0, maxBottom - topEdge);
+    const h = Math.min(padH, Math.max(12, usableTopSpace));
+    const y = Math.max(topEdge, maxBottom - h);
+    return {x:L.x+margin, y, w:L.w-2*margin, h};
+  }
 
-            <div className="relative w-full min-h-[900px]">
-              <svg viewBox="0 0 1800 1000" className="w-full h-auto">
-                <defs>
-                  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={isNight ? "#1e3a8a" : "#bae6fd"} />
-                    <stop offset="100%" stopColor={isNight ? "#475569" : "#d1fae5"} />
-                  </linearGradient>
-                </defs>
-                <rect x="0" y="0" width="1800" height="1000" fill="url(#sky)" />
-                <rect x="0" y="900" width="1800" height="100" fill={isNight ? "#14532d" : "#86efac"} />
+  // --- RENDER ---
+  function apply(step){
+    if(step.k==='roadH') add(roadsLayer,`<rect x="-60" y="${step.y}" width="${TOTAL+120}" height="${ROAD_W}" fill="#475569"/>`,'anim-rise');
+    else if(step.k==='roadV') add(roadsLayer,`<rect x="${step.x}" y="-60" width="${ROAD_W}" height="${TOTAL+120}" fill="#475569"/>`,'anim-rise');
+    else if(step.k==='lanes'){
+      let out='';
+      for(let r=0;r<=GRID;r++){const y=r*CELL-1.5;for(let x=10;x<TOTAL-10;x+=28) out+=`<rect x="${x}" y="${y}" width="16" height="3" fill="#facc15"/>`;}
+      for(let c=0;c<=GRID;c++){const x=c*CELL-1.5;for(let y=10;y<TOTAL-10;y+=28) out+=`<rect x="${x}" y="${y}" width="3" height="16" fill="#facc15"/>`;}
+      add(laneLayer,out,'anim-fade');
+    }
+    else if(step.k==='lot'){
+      add(lotsLayer,`<rect x="${step.L.x}" y="${step.L.y}" width="${step.L.w}" height="${step.L.h}" fill="#e2e8f0" stroke="#cbd5e1"/>`,'anim-fade');
+    }
 
-                <g transform="skewY(-12) scaleY(0.9)">
-                  {visible.map((step, idx) => {
-                    switch (step.type) {
-                      case "roadH":
-                        return <rect key={idx} x={step.x} y={step.y} width={step.w} height="12" fill="#475569" />;
-                      case "roadV":
-                        return <rect key={idx} x={step.x} y={step.y} width="12" height={step.h} fill="#475569" />;
-                      case "lanePaint": {
-                        const stripes: number[] = [];
-                        for (let x = step.x + 10; x < step.x + step.w - 10; x += 28) stripes.push(x);
-                        return (
-                          <g key={idx} className="anim-fade">
-                            {stripes.map((sx) => (
-                              <rect key={sx} x={sx} y={step.y + 4} width={16} height={3} fill="#facc15" rx={1} />
-                            ))}
-                          </g>
-                        );
-                      }
-                      case "lanePaintV": {
-                        const stripes: number[] = [];
-                        for (let y = step.y + 10; y < step.y + step.h - 10; y += 28) stripes.push(y);
-                        return (
-                          <g key={idx} className="anim-fade">
-                            {stripes.map((sy) => (
-                              <rect key={sy} x={step.x + 4} y={sy} width={3} height={16} fill="#facc15" rx={1} />
-                            ))}
-                          </g>
-                        );
-                      }
-                      case "crosswalk": {
-                        const bars: number[] = [];
-                        for (let i = 0; i < 6; i++) bars.push(i);
-                        return (
-                          <g key={idx} className="anim-fade">
-                            {bars.map((i) => (
-                              <rect key={i} x={step.x + i * 4} y={step.y} width={3} height={step.h} fill="#e5e7eb" />
-                            ))}
-                          </g>
-                        );
-                      }
-                      case "sidewalk":
-                        return <rect key={idx} x={step.x} y={step.y} width={step.w} height={step.h} fill="#cbd5e1" />;
-                      case "trafficLight":
-                        return (
-                          <g key={idx} className="anim-fade">
-                            <rect x={step.x} y={step.y - 20} width="4" height="20" fill="#1e293b" />
-                            <rect x={step.x - 4} y={step.y - 24} width="12" height="8" rx={2} fill="#334155" />
-                            <circle cx={step.x + 2} cy={step.y - 22} r="1.5" fill="#dc2626" />
-                            <circle cx={step.x + 2} cy={step.y - 19} r="1.5" fill="#facc15" />
-                            <circle cx={step.x + 2} cy={step.y - 16} r="1.5" fill="#16a34a" />
-                          </g>
-                        );
-                      case "buildingLayer":
-                        return (
-                          <rect
-                            key={idx}
-                            x={step.x}
-                            y={step.y}
-                            width={step.w}
-                            height={step.h}
-                            fill={step.color}
-                            stroke="#1e293b"
-                            strokeWidth="2"
-                            className="anim-rise origin-bottom"
-                          />
-                        );
-                      case "rooftop":
-                        return (
-                          <rect
-                            key={idx}
-                            x={step.x}
-                            y={step.y}
-                            width={step.w}
-                            height={step.h}
-                            fill="#64748b"
-                            stroke="#94a3b8"
-                            strokeWidth="1"
-                            rx={2}
-                            className="anim-fade"
-                          />
-                        );
-                      case "window":
-                        return (
-                          <rect
-                            key={idx}
-                            x={step.x}
-                            y={step.y}
-                            width="12"
-                            height="8"
-                            fill={isNight ? "#fde68a" : "#e0f2fe"}
-                            stroke={isNight ? "#fcd34d" : "#bae6fd"}
-                            strokeWidth="0.5"
-                            className="anim-fade"
-                          />
-                        );
-                      case "bench":
-                        return (
-                          <g key={idx} className="anim-fade">
-                            <rect x={step.x - 10} y={step.y - 3} width={20} height={3} fill="#92400e" />
-                            <rect x={step.x - 10} y={step.y - 6} width={20} height={3} fill="#b45309" />
-                            <rect x={step.x - 9} y={step.y} width={2} height={4} fill="#78350f" />
-                            <rect x={step.x + 7} y={step.y} width={2} height={4} fill="#78350f" />
-                          </g>
-                        );
-                      case "busStop":
-                        return (
-                          <g key={idx} className="anim-fade">
-                            <rect x={step.x} y={step.y - 16} width="4" height="16" fill="#0f172a" />
-                            <rect x={step.x + 6} y={step.y - 14} width="22" height="10" rx={2} fill="#3b82f6" />
-                          </g>
-                        );
-                      case "park":
-                        return (
-                          <rect
-                            key={idx}
-                            x={step.x}
-                            y={step.y}
-                            width={step.w}
-                            height={step.h}
-                            fill="#86efac"
-                            stroke="#16a34a"
-                            strokeWidth="1"
-                            rx={3}
-                            className="anim-fade"
-                          />
-                        );
-                      case "tree":
-                        return (
-                          <g key={idx} className="anim-fade">
-                            <circle cx={step.x} cy={step.y} r="12" fill="#16a34a" />
-                            <rect x={step.x - 3} y={step.y} width="6" height="15" fill="#78350f" />
-                          </g>
-                        );
-                      case "streetlight":
-                        return (
-                          <g key={idx} className="anim-fade">
-                            <rect x={step.x} y={step.y - 40} width="4" height="40" fill="#475569" />
-                            <circle cx={step.x + 2} cy={step.y - 40} r="6" fill="#fde047" />
-                          </g>
-                        );
-                      case "car":
-                        return (
-                          <g key={idx} className="anim-slide">
-                            <rect x={step.x} y={step.y} width="32" height="12" rx="3" fill={step.color} />
-                            <rect x={step.x + 8} y={step.y - 4} width="16" height="6" rx="2" fill="#e5e7eb" />
-                            <rect x={step.x + 10} y={step.y - 2} width="12" height="4" rx="1" fill="#93c5fd" />
-                            <circle cx={step.x + 6} cy={step.y + 12} r="2" fill="#0f172a" />
-                            <circle cx={step.x + 26} cy={step.y + 12} r="2" fill="#0f172a" />
-                          </g>
-                        );
-                      case "cloud":
-                        return (
-                          <g key={idx} className="anim-cloud">
-                            <ellipse cx={step.x} cy={step.y} rx="35" ry="20" fill="#f1f5f9" />
-                            <ellipse cx={step.x + 25} cy={step.y + 10} rx="35" ry="20" fill="#f1f5f9" />
-                            <ellipse cx={step.x - 25} cy={step.y + 10} rx="35" ry="20" fill="#f1f5f9" />
-                          </g>
-                        );
-                      default:
-                        return null;
-                    }
-                  })}
-                </g>
-              </svg>
-            </div>
-          </div>
-        </section>
+    // --- PARK ---
+    else if(step.k==='parkBase'){
+      add(parkLayer,`<rect x="${step.L.x}" y="${step.L.y}" width="${step.L.w}" height="${step.L.h}" rx="14" fill="#a7f3d0" stroke="#10b981"/>`,'anim-fade');
+    }
+    else if(step.k==='parkField'){
+      const fw=step.L.w*0.86, fh=step.L.h*0.70;
+      const fx=step.L.x+(step.L.w-fw)/2, fy=step.L.y+(step.L.h-fh)/2;
+      add(parkLayer,`<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" rx="10" fill="#86efac" stroke="#16a34a"/>`,'anim-fade');
+    }
+    else if(step.k==='parkCourt'){
+      const cw=120, ch=70; const cx=step.L.x+step.L.w-20-cw, cy=step.L.y+step.L.h-20-ch;
+      add(parkLayer,`<g class="anim-fade">
+        <rect x="${cx}" y="${cy}" width="${cw}" height="${ch}" rx="6" fill="#fca5a5" stroke="#ef4444"/>
+        <line x1="${cx+cw/2}" y1="${cy}" x2="${cx+cw/2}" y2="${cy+ch}" stroke="#fff"/>
+        <circle cx="${cx+cw/2}" cy="${cy+ch/2}" r="10" fill="none" stroke="#fff"/>
+        <line x1="${cx+10}" y1="${cy+10}" x2="${cx+10}" y2="${cy+18}" stroke="#111827" stroke-width="2"/>
+        <rect x="${cx+8}" y="${cy+6}" width="4" height="6" fill="#e5e7eb" stroke="#9ca3af"/>
+      </g>`);
+    }
+    else if(step.k==='parkPlay'){
+      const px=step.L.x+22, py=step.L.y+22;
+      add(parkLayer,`<g class="anim-fade">
+        <rect x="${px}" y="${py}" width="92" height="56" rx="8" fill="#fde68a" stroke="#f59e0b"/>
+        <rect x="${px+36}" y="${py-20}" width="4" height="20" fill="#374151"/>
+        <line x1="${px+38}" y1="${py-20}" x2="${px+74}" y2="${py-20}" stroke="#374151"/>
+        <rect x="${px+72}" y="${py-20}" width="4" height="20" fill="#374151"/>
+        <circle cx="${px+52}" cy="${py+10}" r="7" fill="#ef4444"/>
+        <circle cx="${px+72}" cy="${py+10}" r="7" fill="#3b82f6"/>
+      </g>`);
+    }
+    else if(step.k==='parkPaths'){
+      const mx=step.L.x+step.L.w/2, my=step.L.y+step.L.h/2;
+      add(parkLayer,`<g class="anim-fade">
+        <rect x="${mx-4}" y="${step.L.y+10}" width="8" height="${step.L.h-20}" fill="#e5e7eb" stroke="#cbd5e1"/>
+        <rect x="${step.L.x+10}" y="${my-4}" width="${step.L.w-20}" height="8" fill="#e5e7eb" stroke="#cbd5e1"/>
+      </g>`);
+    }
+    else if(step.k==='parkTrees'){
+      let trees=''; for(let i=0;i<8;i++){
+        const tx=step.L.x+12+i*((step.L.w-24)/7);
+        const ty=step.L.y+12+(i%2?step.L.h-24:0);
+        trees+=`<g class="anim-fade"><circle cx="${tx}" cy="${ty}" r="10" fill="#16a34a"/><rect x="${tx-2}" y="${ty}" width="4" height="10" fill="#78350f"/></g>`;
+      }
+      add(parkLayer,trees,'');
+    }
+    else if(step.k==='parkBench'){
+      add(parkLayer,`<g class="anim-fade"><rect x="${step.L.x+20}" y="${step.L.y+step.L.h-18}" width="36" height="4" fill="#92400e"/><rect x="${step.L.x+20}" y="${step.L.y+step.L.h-22}" width="36" height="4" fill="#b45309"/><rect x="${step.L.x+22}" y="${step.L.y+step.L.h-14}" width="2" height="6" fill="#78350f"/><rect x="${step.L.x+52}" y="${step.L.y+step.L.h-14}" width="2" height="6" fill="#78350f"/></g>`);
+    }
+    else if(step.k==='parkFlowers'){
+      let petals=''; for(let i=0;i<12;i++){const fx=step.L.x+10+Math.random()*(step.L.w-20), fy=step.L.y+10+Math.random()*(step.L.h-20); petals+=`<circle cx="${fx}" cy="${fy}" r="2" fill="#ef4444"/>`; }
+      add(parkLayer,`<g class="anim-fade">${petals}</g>`);
+    }
 
-        <aside className="space-y-4">
-          <div className="bg-white/70 rounded-2xl p-5 ring-1 ring-slate-200 shadow-sm">
-            <h2 className="text-xl font-semibold mb-2">Earnings</h2>
-            <div className="text-4xl font-bold tabular-nums">${earnings.toLocaleString()}</div>
-            <p className="text-sm text-slate-600">${PAY_PER_TASK.toFixed(0)} per task × {t} tasks</p>
-          </div>
-        </aside>
-      </main>
+    // --- LOT EXTRAS (clipped) ---
+    else if(step.k==='lot-sidewalk'){
+      const L=step.L;
+      add(detailsLayer,wrapClip(L,`<rect x="${L.x-8}" y="${L.y+L.h-8}" width="${L.w+16}" height="8" fill="#cbd5e1"/>`),'anim-fade');
+    }
 
-      <style>{`
-        @keyframes rise { from { transform: scaleY(0); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes drift { from { transform: translateX(0); } to { transform: translateX(80px); } }
-        .anim-rise { animation: rise .6s ease-out both; }
-        .anim-fade { animation: fadeIn .5s ease-in both; }
-        .anim-slide { animation: slideIn .6s ease-out both; }
-        .anim-cloud { animation: drift 30s linear infinite alternate; }
-      `}</style>
-    </div>
-  );
-}
+    // --- BUILDINGS (phased & clipped; set footprint in body; set roof clearance in roof) ---
+    else if(step.k==='b-found'){
+      const L=step.L, x=L.x, y=L.y, w=L.w, h=L.h;
+      add(buildingsLayer,wrapClip(L,`<rect x="${x+8}" y="${y+h-10}" width="${w-16}" height="10" fill="#94a3b8" stroke="#475569"/>`),'anim-rise');
+    }
+    else if(step.k==='b-body'){
+      const L=step.L, t=step.type, baseY=L.y+L.h;
+      if(t==='house'){
+        const x=L.x+24, y=baseY-52, w=72, h=52;
+        add(buildingsLayer,wrapClip(L,`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fef3c7" stroke="#d97706"/>`),'anim-rise');
+        setFootprint(L,x,y,w,h);
+      }else if(t==='shop'){
+        const x=L.x+20, y=baseY-56, w=88, h=56;
+        add(buildingsLayer,wrapClip(L,`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#e0f2fe" stroke="#60a5fa"/>`),'anim-rise');
+        setFootprint(L,x,y,w,h);
+      }else if(t==='restaurant'){
+        const x=L.x+16, y=baseY-64, w=100, h=64;
+        add(buildingsLayer,wrapClip(L,`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fee2e2" stroke="#fca5a5"/>`),'anim-rise');
+        setFootprint(L,x,y,w,h);
+      }else if(t==='church'){
+        const x=L.x+28, y=baseY-86, w=116, h=86;
+        add(buildingsLayer,wrapClip(L,`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fef9c3" stroke="#fde68a"/>`),'anim-rise');
+        setFootprint(L,x,y,w,h);
+      }else if(t==='office'){
+        const x=L.x+18, y=baseY-104, w=120, h=104;
+        add(buildingsLayer,wrapClip(L,`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#cbd5e1" stroke="#94a3b8"/>`),'anim-rise');
+        setFootprint(L,x,y,w,h);
+      }else if(t==='skyscraper'){
+        const w=Math.min(L.w-24, 140);
+        const h=200+Math.floor(rand()*140);
+        const x=L.x+(L.w-w)/2, y=baseY-h;
+        add(buildingsLayer,wrapClip(L,`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#1f2937" stroke="#0f172a" stroke-width="2"/>`),'anim-rise');
+        setFootprint(L,x,y,w,h);
+        L._sky={sx:x, sy:baseY, w, h};
+      }
+    }
+    else if(step.k==='b-roof'){
+      const L=step.L, t=step.type, baseY=L.y+L.h;
+      // draw roofs and set clearance so yards/parking never overlap them
+      if(t==='house'){
+        add(detailsLayer,wrapClip(L,`<polygon points="${L.x+24},${baseY-52} ${L.x+96},${baseY-52} ${L.x+60},${baseY-84}" fill="#b91c1c" stroke="#7f1d1d"/>`),'anim-fade');
+        L._roofClearance = 30; // gable
+      }else if(t==='shop'){
+        add(detailsLayer,wrapClip(L,`<rect x="${L.x+20}" y="${baseY-56}" width="88" height="12" fill="#93c5fd"/>`),'anim-fade');
+        L._roofClearance = 14; // flat cap
+      }else if(t==='restaurant'){
+        add(detailsLayer,wrapClip(L,`<rect x="${L.x+16}" y="${baseY-64}" width="100" height="14" fill="#ef4444"/>`),'anim-fade');
+        L._roofClearance = 14; // flat cap
+      }else if(t==='church'){
+        add(detailsLayer,wrapClip(L,`<polygon points="${L.x+28},${baseY-86} ${L.x+144},${baseY-86} ${L.x+86},${baseY-116}" fill="#b91c1c" stroke="#7f1d1d"/>`),'anim-fade');
+        L._roofClearance = 34; // steep roof
+      }else if(t==='office'){
+        L._roofClearance = 14; // flat
+      }else if(t==='skyscraper'){
+        L._roofClearance = 16; // parapet
+      }
+    }
+    else if(step.k==='b-door'){
+      const L=step.L, t=step.type, baseY=L.y+L.h;
+      const dx = t==='house' ? L.x+56 : L.x+28;
+      add(detailsLayer,wrapClip(L,`<rect x="${dx}" y="${baseY-22}" width="14" height="22" fill="#78350f" stroke="#4b2e0a"/>`),'anim-fade');
+    }
+    else if(step.k==='b-winbatch'){
+      const L=step.L, t=step.type, baseY=L.y+L.h;
+      if(t==='house'){
+        add(detailsLayer,wrapClip(L,`<rect x="${L.x+36}" y="${baseY-40}" width="14" height="12" class="window"/><rect x="${L.x+70}" y="${baseY-40}" width="14" height="12" class="window"/>`),'anim-fade');
+      }else if(t==='shop' || t==='restaurant'){
+        let wins=''; for(let c=0;c<3;c++){const wx=(t==='shop'?L.x+28:L.x+22)+c*26; const wy=baseY-(t==='shop'?42:46); wins+=`<rect x="${wx}" y="${wy}" width="16" height="12" class="window"/>`; }
+        add(detailsLayer,wrapClip(L,`<g class="anim-fade">${wins}</g>`));
+      }else if(t==='office'){
+        let wins=''; const row=step.n||1; for(let c=0;c<4;c++){ const wx=L.x+28+c*28, wy=baseY-(row===1?92:row===2?66:40); wins+=`<rect x="${wx}" y="${wy}" width="16" height="10" class="window"/>`; }
+        add(detailsLayer,wrapClip(L,`<g class="anim-fade">${wins}</g>`));
+      }
+    }
+    else if(step.k==='b-sign'){
+      const L=step.L, baseY=L.y+L.h;
+      add(detailsLayer,wrapClip(L,`<text x="${L.x+66}" y="${baseY-68}" fill="#1e3a8a" font-size="10" text-anchor="middle">${step.text||''}</text>`),'anim-fade');
+    }
+    else if(step.k==='b-awning'){
+      const L=step.L, baseY=L.y+L.h;
+      add(detailsLayer,wrapClip(L,`<rect x="${L.x+20}" y="${baseY-56}" width="88" height="10" fill="#ef4444"/>`),'anim-fade');
+    }
+    else if(step.k==='b-garden'){
+      const L=step.L; const Y = L._yard || rectBehindBuilding(L, 63, 6); // 2.25× bigger
+      add(detailsLayer,wrapClip(L,`<rect x="${Y.x+6}" y="${Y.y+Y.h-8}" width="${Math.max(24, Y.w-12)}" height="6" fill="#86efac" stroke="#16a34a"/>`));
+    }
+    else if(step.k==='b-planters'){
+      const L=step.L; const P = L._park || rectBehindBuilding(L, 54, 6); // 2.25× bigger
+      add(detailsLayer,wrapClip(L,`<g class="anim-fade"><rect x="${P.x+6}" y="${P.y+P.h-8}" width="12" height="6" fill="#a7f3d0" stroke="#10b981"/><rect x="${P.x+P.w-18}" y="${P.y+P.h-8}" width="12" height="6" fill="#a7f3d0" stroke="#10b981"/></g>`));
+    }
+    else if(step.k==='b-outdoorSeats'){
+      const L=step.L; const P = L._park || rectBehindBuilding(L, 54, 6);
+      add(detailsLayer,wrapClip(L,`<g class="anim-fade"><rect x="${P.x+8}" y="${P.y+P.h-10}" width="14" height="4" fill="#b45309"/><rect x="${P.x+28}" y="${P.y+P.h-10}" width="14" height="4" fill="#b45309"/></g>`));
+    }
+    else if(step.k==='b-roundWindow'){
+      const L=step.L, baseY=L.y+L.h;
+      add(detailsLayer,wrapClip(L,`<circle cx="${L.x+86}" cy="${baseY-62}" r="8" class="window"/>`),'anim-fade');
+    }
+    else if(step.k==='b-cross'){
+      const L=step.L, baseY=L.y+L.h;
+      add(detailsLayer,wrapClip(L,`<g class="anim-fade"><rect x="${L.x+85}" y="${baseY-126}" width="2" height="12" fill="#f8fafc"/><rect x="${L.x+80}" y="${baseY-122}" width="12" height="2" fill="#f8fafc"/></g>`));
+    }
+    else if(step.k==='b-lamp'){
+      const L=step.L; const Y = (L._yard || L._park || {x:L.x+10, y:L.y+L.h-40});
+      add(detailsLayer,wrapClip(L,`<g class="anim-fade"><rect x="${Y.x+6}" y="${Y.y}" width="3" height="40" fill="#475569"/><circle cx="${Y.x+7.5}" cy="${Y.y}" r="6" fill="#fde047"/></g>`));
+    }
+    else if(step.k==='b-lobby'){
+      const L=step.L, baseY=L.y+L.h;
+      add(detailsLayer,wrapClip(L,`<rect x="${L.x+60}" y="${baseY-22}" width="24" height="22" fill="#e5e7eb" stroke="#94a3b8"/>`),'anim-fade');
+    }
+    else if(step.k==='b-winrows' && step.L._sky){
+      const L=step.L; const {sx,sy,w,h}=L._sky;
+      let wins=''; const floors=Math.max(6,Math.floor(h/26)); const cols=Math.max(3,Math.floor(w/24));
+      const startRow=(step.n-1)*Math.ceil(floors/4);
+      const endRow=Math.min(floors, step.n*Math.ceil(floors/4));
+      for(let r=startRow;r<endRow;r++){
+        for(let c=0;c<cols;c++){
+          const wx=sx+10+c*(w-20)/(cols-1)-6, wy=sy-h+14+r*(h-28)/floors;
+          wins+=`<rect x="${wx}" y="${wy}" width="12" height="8" class="window"/>`;
+        }
+      }
+      add(detailsLayer,wrapClip(L,`<g class="anim-fade">${wins}</g>`));
+    }
+    else if(step.k==='b-rooftopUnit' && step.L._sky){
+      const L=step.L; const {sx,sy,w,h}=L._sky;
+      add(detailsLayer,wrapClip(L,`<rect x="${sx+w/2-16}" y="${sy-h-10}" width="32" height="10" fill="#64748b" stroke="#334155"/>`),'anim-fade');
+    }
+
+    // --- Yard/Parking behind building (BIG and roof-safe) ---
+    else if(step.k==='yard-base'){
+      const L=step.L; const Y = rectBehindBuilding(L, 63, 6); L._yard=Y; // 2.25×
+      add(detailsLayer,wrapClip(L,`<rect x="${Y.x}" y="${Y.y}" width="${Y.w}" height="${Y.h}" fill="#bbf7d0" stroke="#10b981"/>`),'anim-fade');
+    }
+    else if(/^yard-fence-/.test(step.k)){
+      const L=step.L; const Y=L._yard || rectBehindBuilding(L, 63, 6);
+      if(step.k==='yard-fence-n') add(detailsLayer,wrapClip(L,`<rect x="${Y.x}" y="${Y.y}" width="${Y.w}" height="3" fill="#eab308"/>`),'anim-fade');
+      if(step.k==='yard-fence-e') add(detailsLayer,wrapClip(L,`<rect x="${Y.x+Y.w-3}" y="${Y.y}" width="3" height="${Y.h}" fill="#eab308"/>`),'anim-fade');
+      if(step.k==='yard-fence-s') add(detailsLayer,wrapClip(L,`<rect x="${Y.x}" y="${Y.y+Y.h-3}" width="${Y.w}" height="3" fill="#eab308"/>`),'anim-fade');
+      if(step.k==='yard-fence-w') add(detailsLayer,wrapClip(L,`<rect x="${Y.x}" y="${Y.y}" width="3" height="${Y.h}" fill="#eab308"/>`),'anim-fade');
+    }
+    else if(step.k==='yard-flower'){
+      const L=step.L; const Y=L._yard || rectBehindBuilding(L, 63, 6);
+      const fx=Y.x+6+Math.random()*(Math.max(4,Y.w-12)), fy=Y.y+6+Math.random()*(Math.max(4,Y.h-12));
+      add(detailsLayer,wrapClip(L,`<circle cx="${fx}" cy="${fy}" r="2" fill="#ef4444"/>`),'anim-fade');
+    }
+    else if(step.k==='park-base'){
+      const L=step.L; const P=rectBehindBuilding(L, 54, 6); L._park=P; // 2.25×
+      add(detailsLayer,wrapClip(L,`<rect x="${P.x}" y="${P.y}" width="${P.w}" height="${P.h}" fill="#374151" stroke="#111827"/>`),'anim-fade');
+    }
+    else if(step.k==='park-stripes'){
+      const L=step.L; const P=L._park || rectBehindBuilding(L, 54, 6);
+      let lines=''; const n=step.n||1, start=(n-1)*6, end=start+6;
+      for(let i=start;i<end;i++){
+        const px=P.x+8+i*10; if(px>P.x+P.w-10) break;
+        lines+=`<rect x="${px}" y="${P.y+2}" width="2" height="${P.h-4}" fill="#facc15" />`;
+      }
+      add(detailsLayer,wrapClip(L,`<g class="anim-fade">${lines}</g>`));
+    }
+  }
+
+  // --- TASK FLOW (with error guard) ---
+  function applyNext(){
+    try{
+      if(taskIndex>=steps.length) return;
+      apply(steps[taskIndex]);
+      taskIndex++; tasks++; updateUI();
+      if(tasks%25===0) spawnCars(1);
+    }catch(e){
+      console.error(e);
+      toast(`Oops, step ${taskIndex+1} failed: ${e.message}`);
+    }
+  }
+
+  document.getElementById('addTask').addEventListener('click',applyNext);
+  document.getElementById('undoTask').addEventListener('click',()=>{
+    if(taskIndex<=0) return;
+    taskIndex--; tasks--;
+    resetScene();
+    for(let i=0;i<taskIndex;i++) apply(steps[i]);
+    const carsToRespawn=Math.floor(tasks/25);
+    if(carsToRespawn>0) spawnCars(carsToRespawn);
+    updateUI();
+  });
+  document.getElementById('reset').addEventListener('click',()=>{
+    taskIndex=0; tasks=0; resetScene(); updateUI();
+  });
+
+  function resetScene(){
+    [roadsLayer,laneLayer,lotsLayer,buildingsLayer,detailsLayer,parkLayer,carsLayer].forEach(g=>g.innerHTML='');
+    cars=[];
+    if(carTimer){clearInterval(carTimer);carTimer=null;}
+    (function setupClips(){
+      const svg=document.querySelector('svg');
+      let defs=svg.querySelector('defs');
+      if(!defs){ defs=document.createElementNS('http://www.w3.org/2000/svg','defs'); svg.insertBefore(defs, svg.firstChild); }
+      defs.innerHTML='';
+      for(const L of lots){
+        const cp=document.createElementNS('http://www.w3.org/2000/svg','clipPath');
+        cp.setAttribute('id',`clip-${L.key}`);
+        const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        r.setAttribute('x',L.x); r.setAttribute('y',L.y); r.setAttribute('width',L.w); r.setAttribute('height',L.h);
+        cp.appendChild(r); defs.appendChild(cp);
+      }
+    })();
+  }
+
+  updateUI();
+
+  // --- CARS ---
+  function spawnCars(count){
+    if(!carTimer) carTimer=setInterval(tickCars,40);
+    const colors=['#ef4444','#3b82f6','#10b981','#f59e0b','#a78bfa'];
+    for(let i=0;i<count;i++){
+      const horizontal=Math.random()<0.5;
+      const grid=Math.floor(Math.random()*(GRID+1));
+      const speed=1.2+Math.random()*1.4;
+      const car={
+        dir:horizontal?'H':'V',
+        x:horizontal?-60:grid*CELL,
+        y:horizontal?grid*CELL:-60,
+        vx:horizontal?Math.abs(speed):0,
+        vy:horizontal?0:Math.abs(speed),
+        color:colors[Math.floor(Math.random()*colors.length)],
+        cool:0
+      };
+      const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+      g.setAttribute('class','anim-fade');
+      g.innerHTML = horizontal
+        ? `<g>
+             <rect x="-16" y="-7" width="32" height="14" rx="4" fill="${car.color}" stroke="#111827" stroke-width="1"/>
+             <rect x="-10" y="-11" width="20" height="8" rx="2" fill="#e5e7eb"/>
+             <circle cx="-10" cy="9" r="3" fill="#0f172a"/>
+             <circle cx="10"  cy="9" r="3" fill="#0f172a"/>
+           </g>`
+        : `<g>
+             <rect x="-7" y="-16" width="14" height="32" rx="4" fill="${car.color}" stroke="#111827" stroke-width="1"/>
+             <rect x="-11" y="-10" width="8" height="20" rx="2" fill="#e5e7eb"/>
+             <circle cx="0" cy="-10" r="3" fill="#0f172a"/>
+             <circle cx="0" cy="10"  r="3" fill="#0f172a"/>
+           </g>`;
+      car.el=g; carsLayer.appendChild(g); setCarTransform(car); cars.push(car);
+    }
+  }
+  function setCarTransform(car){ car.el.setAttribute('transform',`translate(${car.x},${car.y})`); }
+  function tickCars(){
+    if(!cars.length) return;
+    for(const car of cars){
+      car.x+=car.vx; car.y+=car.vy;
+      if(car.x<-80)car.x=TOTAL+80; if(car.x>TOTAL+80)car.x=-80;
+      if(car.y<-80)car.y=TOTAL+80; if(car.y>TOTAL+80)car.y=-80;
+      if(car.cool>0){ car.cool--; setCarTransform(car); continue; }
+      const near=5;
+      const cx=Math.round(car.x/CELL)*CELL;
+      const cy=Math.round(car.y/CELL)*CELL;
+      const atCross=Math.abs(car.x-cx)<near && Math.abs(car.y-cy)<near;
+      if(atCross){
+        car.x=cx; car.y=cy; car.cool=12;
+        const turn=Math.random()<0.33;
+        if(turn){
+          const s=Math.max(1.0,Math.hypot(car.vx,car.vy));
+          if(car.dir==='H'){ car.dir='V'; const sign=Math.random()<0.5?-1:1; car.vx=0; car.vy=sign*s; }
+          else { car.dir='H'; const sign=Math.random()<0.5?-1:1; car.vx=sign*s; car.vy=0; }
+        }
+      }
+      setCarTransform(car);
+    }
+  }
+</script>
+
